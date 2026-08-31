@@ -1,9 +1,3 @@
 {
-  "version": 2,
-  "buildCommand": null,
-  "installCommand": null,
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-    { "src": "/(.*)", "dest": "/public/$1" }
-  ]
+  "version": 2
 }
