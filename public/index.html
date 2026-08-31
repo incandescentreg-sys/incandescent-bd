@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>INCANDESCENT DB · OSINT Database</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0a0e14;--surface:#121820;--card:#182230;--border:#1e3044;--text:#c8d6e5;--dim:#607588;--accent:#00e5a0;--accent-dim:#009970;--warn:#ff6b4a;--hl:rgba(0,229,160,0.08);--font:'JetBrains Mono','Cascadia Code','Fira Code','Consolas',monospace}
+body{background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;line-height:1.5;min-height:100vh}
+body::after{content:'';position:fixed;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,0.06) 0,rgba(0,0,0,0.06) 1px,transparent 1px,transparent 3px);z-index:9999;pointer-events:none}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-track{background:var(--surface)}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:var(--dim)}
+::selection{background:var(--accent);color:var(--bg)}
+
+.login-overlay{position:fixed;inset:0;z-index:10000;background:var(--bg);display:flex;align-items:center;justify-content:center}
+.login-box{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:40px 36px 32px;width:380px;max-width:94vw;text-align:center}
+.login-box .logo{font-size:24px;font-weight:700;color:var(--accent);letter-spacing:2px;margin-bottom:4px}
+.login-box .sub{font-size:11px;color:var(--dim);margin-bottom:28px;letter-spacing:1px}
+.login-box .error{font-size:11px;color:var(--warn);margin-bottom:12px;min-height:18px}
+.login-box label{display:block;text-align:left;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.login-box input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-family:var(--font);font-size:13px;outline:none;transition:.15s}
+.login-box input:focus{border-color:var(--accent)}
+.login-box button{width:100%;margin-top:20px;padding:10px;background:var(--accent);color:var(--bg);border:none;border-radius:6px;font-family:var(--font);font-weight:700;font-size:12px;letter-spacing:1px;cursor:pointer;text-transform:uppercase;transition:.15s}
+.login-box button:hover{background:var(--accent-dim)}
+
+.topbar{display:flex;align-items:center;gap:16px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100}
+.topbar .logo{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:700;letter-spacing:1px}
+.topbar .logo .icon{width:28px;height:28px;border:2px solid var(--accent);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--accent)}
+.topbar .logo span{color:var(--accent)}
+.topbar .badge{font-size:10px;color:var(--dim);border:1px solid var(--border);padding:2px 10px;border-radius:12px;letter-spacing:.5px}
+.topbar .status{margin-left:auto;font-size:10px;color:var(--dim);display:flex;align-items:center;gap:6px}
+.topbar .status .dot{width:6px;height:6px;border-radius:50%;background:var(--accent);animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.topbar .logout-btn{background:var(--card);border:1px solid var(--border);color:var(--dim);padding:6px 12px;border-radius:6px;font-family:var(--font);font-size:10px;cursor:pointer;transition:.15s;letter-spacing:.5px}
+.topbar .logout-btn:hover{border-color:var(--warn);color:var(--warn)}
+.topbar .add-btn{background:var(--accent);color:var(--bg);border:none;padding:6px 14px;border-radius:6px;font-family:var(--font);font-size:11px;font-weight:700;cursor:pointer;transition:.15s;letter-spacing:.5px}
+.topbar .add-btn:hover{background:var(--accent-dim)}
+
+.search-section{padding:24px 24px 12px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
+.search-section input{flex:1;min-width:200px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;color:var(--text);font-family:var(--font);font-size:13px;outline:none;transition:.15s}
+.search-section input:focus{border-color:var(--accent)}
+.search-section button{background:var(--accent);color:var(--bg);border:none;padding:10px 20px;border-radius:6px;font-family:var(--font);font-weight:700;font-size:12px;cursor:pointer;transition:.15s;letter-spacing:.5px;white-space:nowrap}
+.search-section button:hover{background:var(--accent-dim)}
+
+.filters{padding:0 24px 16px;display:flex;gap:6px;flex-wrap:wrap}
+.filters label{font-size:10px;color:var(--dim);display:flex;align-items:center;gap:4px;cursor:pointer;padding:4px 8px;border-radius:4px;transition:.15s}
+.filters label:hover{background:var(--hl)}
+.filters input[type=checkbox]{accent-color:var(--accent)}
+
+.count{font-size:11px;color:var(--dim);padding:0 24px 12px}
+.count span{color:var(--accent)}
+
+.records{display:flex;flex-direction:column;gap:6px;padding:0 24px 40px}
+.record{background:var(--card);border:1px solid var(--border);border-radius:8px;overflow:hidden;transition:.15s}
+.record-header{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;cursor:pointer;user-select:none;gap:8px}
+.record-header:hover{background:var(--hl)}
+.record-header .name{font-size:13px;font-weight:700;color:var(--accent)}
+.record-header .phone{font-size:11px;color:var(--dim)}
+.record-header .del-btn{background:0;border:1px solid transparent;color:var(--warn);font-family:var(--font);font-size:10px;padding:4px 8px;border-radius:4px;cursor:pointer;transition:.15s;opacity:.4}
+.record-header .del-btn:hover{opacity:1;border-color:var(--warn)}
+.record-body{display:none;padding:0 14px 10px;border-top:1px solid var(--border);grid-template-columns:auto 1fr;gap:2px 16px;font-size:12px}
+.record-body.open{display:grid}
+.record-body .label{color:var(--dim);white-space:nowrap}
+.record-body .value{color:var(--text);word-break:break-word}
+.record-body .hl{background:var(--hl);color:var(--accent);padding:0 2px;border-radius:2px}
+
+.modal-overlay{position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,.7);display:none;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:28px;width:520px;max-width:94vw;max-height:90vh;overflow-y:auto}
+.modal h2{font-size:14px;color:var(--accent);margin-bottom:20px;letter-spacing:1px}
+.modal .field{margin-bottom:12px}
+.modal .field label{display:block;font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}
+.modal .field input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 12px;color:var(--text);font-family:var(--font);font-size:12px;outline:none;transition:.15s}
+.modal .field input:focus{border-color:var(--accent)}
+.modal .modal-buttons{display:flex;gap:10px;margin-top:20px}
+.modal .modal-buttons button{flex:1;padding:10px;border-radius:6px;font-family:var(--font);font-weight:700;font-size:12px;cursor:pointer;transition:.15s;letter-spacing:.5px}
+.modal .btn-save{background:var(--accent);color:var(--bg);border:none}
+.modal .btn-save:hover{background:var(--accent-dim)}
+.modal .btn-cancel{background:var(--surface);color:var(--dim);border:1px solid var(--border)}
+.modal .btn-cancel:hover{border-color:var(--dim)}
+
+.empty-state{text-align:center;padding:60px 24px;color:var(--dim)}
+.empty-state .big{font-size:36px;margin-bottom:8px;opacity:.4}
+.empty-state p{font-size:12px}
+</style>
+</head>
+<body>
+
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <div class="logo">INCANDESCENT DB</div>
+    <div class="sub">OSINT · DATABASE · v1.0</div>
+    <div class="error" id="loginError"></div>
+    <label>Логин</label>
+    <input type="text" id="loginUser" autocomplete="off">
+    <label style="margin-top:12px">Пароль</label>
+    <input type="password" id="loginPass" autocomplete="off">
+    <button onclick="login()">ВОЙТИ</button>
+  </div>
+</div>
+
+<div class="topbar" id="topbar" style="display:none">
+  <div class="logo"><div class="icon">S</div><span>INCANDESCENT</span>DB</div>
+  <div class="badge">OSINT</div>
+  <div class="status"><div class="dot"></div>ONLINE</div>
+  <button class="add-btn" onclick="openAddModal()">+ ДОБАВИТЬ</button>
+  <button class="logout-btn" onclick="logout()">ВЫЙТИ</button>
+</div>
+
+<div class="search-section" id="searchSection" style="display:none">
+  <input type="text" id="searchInput" placeholder="Поиск по всем полям…" onkeydown="if(event.key==='Enter')doSearch()">
+  <button onclick="doSearch()">ПОИСК</button>
+  <button onclick="resetSearch()" style="background:var(--surface);border:1px solid var(--border)">СБРОСИТЬ</button>
+</div>
+
+<div class="filters" id="filters" style="display:none"></div>
+
+<div class="count" id="count" style="display:none">Найдено: <span id="foundCount">0</span> · Всего: <span id="totalCount">0</span></div>
+
+<div class="records" id="records"></div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <h2 id="modalTitle">+ НОВАЯ ЗАПИСЬ</h2>
+    <div class="field"><label>ФИО *</label><input type="text" id="mfio" placeholder="Иванов Иван Иванович"></div>
+    <div class="field"><label>Телефон</label><input type="text" id="mphone" placeholder="+7 (999) 123-45-67"></div>
+    <div class="field"><label>Email</label><input type="text" id="memail" placeholder="mail@example.com"></div>
+    <div class="field"><label>Адрес</label><input type="text" id="maddress" placeholder="г. Москва, ул. …"></div>
+    <div class="field"><label>Соцсети</label><input type="text" id="msocial" placeholder="vk.com/..., t.me/..."></div>
+    <div class="field"><label>Авто</label><input type="text" id="mauto" placeholder="Марка, госномер"></div>
+    <div class="field"><label>Недвижимость</label><input type="text" id="mproperty" placeholder="кв. ..."></div>
+    <div class="field"><label>Суды</label><input type="text" id="mcourt" placeholder="№ дела"></div>
+    <div class="field"><label>ИНН</label><input type="text" id="minn" placeholder="10 или 12 цифр"></div>
+    <div class="field"><label>Паспорт</label><input type="text" id="mpassport" placeholder="серия номер"></div>
+    <div class="modal-buttons">
+      <button class="btn-cancel" onclick="closeModal()">ОТМЕНА</button>
+      <button class="btn-save" onclick="saveRecord()">СОХРАНИТЬ</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = ''; // same origin
+const USER = 'User_1010';
+const PASS = 'Id171125';
+
+const FIELDS = ['fio','phone','email','address','social','auto','property','court','inn','passport'];
+const FIELD_LABELS = {fio:'ФИО',phone:'Телефон',email:'Email',address:'Адрес',social:'Соцсети',auto:'Авто',property:'Недвижимость',court:'Суды',inn:'ИНН',passport:'Паспорт'};
+let allRecords = [];
+let filteredRecords = [];
+
+function login() {
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  if (u === USER && p === PASS) {
+    document.getElementById('loginOverlay').style.display = 'none';
+    document.getElementById('topbar').style.display = 'flex';
+    document.getElementById('searchSection').style.display = 'flex';
+    document.getElementById('filters').style.display = 'flex';
+    document.getElementById('count').style.display = 'block';
+    document.getElementById('loginError').textContent = '';
+    initFilters();
+    loadRecords();
+  } else {
+    document.getElementById('loginError').textContent = 'ОТКАЗАНО В ДОСТУПЕ';
+    document.getElementById('loginPass').value = '';
+  }
+}
+
+function logout() {
+  document.getElementById('loginOverlay').style.display = 'flex';
+  document.getElementById('topbar').style.display = 'none';
+  document.getElementById('searchSection').style.display = 'none';
+  document.getElementById('filters').style.display = 'none';
+  document.getElementById('count').style.display = 'none';
+  document.getElementById('records').innerHTML = '';
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  document.getElementById('loginError').textContent = '';
+}
+
+function initFilters() {
+  const container = document.getElementById('filters');
+  container.innerHTML = FIELDS.map(f =>
+    `<label><input type="checkbox" class="filter-cb" value="${f}" checked onchange="doSearch()">${FIELD_LABELS[f]}</label>`
+  ).join('');
+}
+
+async function loadRecords() {
+  try {
+    const r = await fetch(API + '/api/search');
+    const d = await r.json();
+    allRecords = d.records;
+    filteredRecords = allRecords;
+    render();
+  } catch(e) {
+    document.getElementById('records').innerHTML =
+      '<div class="empty-state"><div class="big">⚠</div><p>Ошибка загрузки. Проверьте, работает ли сервер.</p></div>';
+  }
+}
+
+async function doSearch() {
+  const q = document.getElementById('searchInput').value.trim();
+  const checked = [...document.querySelectorAll('.filter-cb:checked')].map(c => c.value);
+  if (!q) return loadRecords();
+  try {
+    const r = await fetch(API + `/api/search?q=${encodeURIComponent(q)}&fields=${checked.join(',')}`);
+    const d = await r.json();
+    allRecords = d.records;
+    filteredRecords = d.records;
+    render();
+  } catch(e) {
+    document.getElementById('records').innerHTML =
+      '<div class="empty-state"><div class="big">⚠</div><p>Ошибка поиска.</p></div>';
+  }
+}
+
+async function resetSearch() {
+  document.getElementById('searchInput').value = '';
+  await loadRecords();
+}
+
+function render() {
+  const container = document.getElementById('records');
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+
+  if (!filteredRecords.length) {
+    container.innerHTML = '<div class="empty-state"><div class="big">🔍</div><p>Ничего не найдено</p></div>';
+    document.getElementById('foundCount').textContent = '0';
+    document.getElementById('totalCount').textContent = allRecords.length;
+    return;
+  }
+
+  container.innerHTML = filteredRecords.map(r => {
+    const name = r.fio && r.fio !== '—' ? r.fio : 'Без имени';
+    const phone = r.phone && r.phone !== '—' ? r.phone : '';
+    return `<div class="record">
+      <div class="record-header" onclick="toggleRecord(this)">
+        <div><div class="name">${hl(name, q)}</div>${phone ? '<div class="phone">'+hl(phone,q)+'</div>' : ''}</div>
+        <button class="del-btn" onclick="event.stopPropagation();deleteRecord(${r.id})">✕</button>
+      </div>
+      <div class="record-body" data-id="${r.id}">
+        ${FIELDS.filter(f => f !== 'fio').map(f =>
+          `<div class="label">${FIELD_LABELS[f]}</div><div class="value">${hl(r[f] || '—', q)}</div>`
+        ).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('foundCount').textContent = filteredRecords.length;
+  document.getElementById('totalCount').textContent = allRecords.length;
+}
+
+function hl(text, query) {
+  if (!query) return text;
+  const s = String(text);
+  const idx = s.toLowerCase().indexOf(query);
+  if (idx === -1) return s;
+  return s.slice(0, idx) + '<span class="hl">' + s.slice(idx, idx + query.length) + '</span>' + s.slice(idx + query.length);
+}
+
+function toggleRecord(header) {
+  const body = header.nextElementSibling;
+  body.classList.toggle('open');
+}
+
+function openAddModal() {
+  document.getElementById('modalTitle').textContent = '+ НОВАЯ ЗАПИСЬ';
+  FIELDS.forEach(f => document.getElementById('m' + f).value = '');
+  document.getElementById('modalOverlay').dataset.mode = 'add';
+  document.getElementById('modalOverlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').classList.remove('open');
+}
+
+async function saveRecord() {
+  const data = {};
+  FIELDS.forEach(f => data[f] = document.getElementById('m' + f).value.trim());
+  if (!data.fio) return alert('ФИО обязательно');
+
+  try {
+    const r = await fetch(API + '/api/add', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(data)
+    });
+    if (!r.ok) {
+      const e = await r.json();
+      return alert('Ошибка: ' + (e.error || r.status));
+    }
+    closeModal();
+    await loadRecords();
+  } catch(e) {
+    alert('Ошибка соединения');
+  }
+}
+
+async function deleteRecord(id) {
+  if (!confirm('Удалить запись #' + id + '?')) return;
+  try {
+    const r = await fetch(API + '/api/delete?id=' + id, { method: 'DELETE' });
+    if (!r.ok) return alert('Не удалось удалить');
+    await loadRecords();
+  } catch(e) {
+    alert('Ошибка соединения');
+  }
+}
+
+document.getElementById('loginPass').addEventListener('keydown', e => { if(e.key==='Enter') login(); });
+document.getElementById('loginUser').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('loginPass').focus(); });
+</script>
+</body>
+</html>
