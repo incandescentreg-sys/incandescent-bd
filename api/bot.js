@@ -1,19 +1,10 @@
 const { neon } = require('@neondatabase/serverless');
 const ALLOWED_FIELDS = ['fio','phone','email','address','social','auto','property','court','inn','passport'];
 const FIELD_NAMES = {'fio':'ФИО','phone':'Телефон','email':'Email','address':'Адрес','social':'Соцсети','auto':'Авто','property':'Недвижимость','court':'Суды','inn':'ИНН','passport':'Паспорт'};
-const ACCESS_CODE = process.env.BOT_ACCESS_CODE || 'sherlock2024';
 function getDb() { return neon(process.env.POSTGRES_URL || process.env.DATABASE_URL); }
-async function ensureTables(sql) {
+async function ensureTable(sql) {
   await sql(`CREATE TABLE IF NOT EXISTS records (id SERIAL PRIMARY KEY,fio TEXT NOT NULL DEFAULT '—',phone TEXT NOT NULL DEFAULT '—',email TEXT NOT NULL DEFAULT '—',address TEXT NOT NULL DEFAULT '—',social TEXT NOT NULL DEFAULT '—',auto TEXT NOT NULL DEFAULT '—',property TEXT NOT NULL DEFAULT '—',court TEXT NOT NULL DEFAULT '—',inn TEXT NOT NULL DEFAULT '—',passport TEXT NOT NULL DEFAULT '—',raw TEXT NOT NULL DEFAULT '—',created_at TIMESTAMP DEFAULT NOW());`);
   await sql(`ALTER TABLE records ADD COLUMN IF NOT EXISTS raw TEXT NOT NULL DEFAULT '—';`);
-  await sql(`CREATE TABLE IF NOT EXISTS bot_users (chat_id BIGINT PRIMARY KEY,created_at TIMESTAMP DEFAULT NOW());`);
-}
-async function isAuthorized(sql, chatId) {
-  const r = await sql`SELECT 1 FROM bot_users WHERE chat_id = ${chatId}`;
-  return r.length > 0;
-}
-async function authorizeUser(sql, chatId) {
-  await sql`INSERT INTO bot_users (chat_id) VALUES (${chatId}) ON CONFLICT DO NOTHING`;
 }
 async function searchRecords(sql, q, field) {
   const p = `%${q}%`;
@@ -27,7 +18,7 @@ function formatRecord(r) {
   if(r.auto!=='—') m+=`🚗 ${r.auto}\n`; if(r.property!=='—') m+=`🏘 ${r.property}\n`;
   if(r.court!=='—') m+=`⚖️ ${r.court}\n`; if(r.inn!=='—') m+=`🔢 ИНН: ${r.inn}\n`;
   if(r.passport!=='—') m+=`🆔 Паспорт: ${r.passport}\n`;
-  if(r.raw && r.raw!=='—') m+=`📄 <b>Полный текст:</b>\n${r.raw.substring(0,500)}\n`;
+  if(r.raw && r.raw!=='—') m+=`\n📄 <b>Полный текст сохранён</b>\n`;
   return m;
 }
 function validateInn(inn) {
@@ -70,7 +61,7 @@ function parseSherlock(text) {
     const m = l.match(/^([\wА-ЯЁа-яё\s\-]+)\s*[:—]\s*(.+)$/);
     if(m) {
       const key = m[1].trim().toLowerCase(), val = m[2].trim();
-      if(/фио|ф\.и\.о|имя|фамилия|фам|person|name/.test(key)||(/^[А-ЯЁ][а-яё]+\s[А-ЯЁ][а-яё]+\s[А-ЯЁ][а-яё]+/.test(l)&&!/[:—]/.test(l))) r.fio=r.fio==='—'?val:r.fio;
+      if(/фио|ф\.и\.о|имя|фамилия|фам|person|name/.test(key)) r.fio=r.fio==='—'?val:r.fio;
       if(/телефон|телефоны|phone|тел|моб|номер|контакт/.test(key)) r.phone=r.phone==='—'?val:r.phone+', '+val;
       if(/email|почта|e-?mail|эл/.test(key)) r.email=r.email==='—'?val:r.email+', '+val;
       if(/адрес|адреса|address|прожив|регистрац|место/.test(key)) r.address=r.address==='—'?val:r.address+', '+val;
@@ -81,7 +72,6 @@ function parseSherlock(text) {
       if(/инн|inn|ип/.test(key)&&!/паспорт|passport/.test(key)) r.inn=r.inn==='—'?val:r.inn;
       if(/паспорт|passport|пасп.*№|удост/.test(key)) r.passport=r.passport==='—'?val:r.passport;
     } else {
-      // без ключа — пытаемся угадать
       if(r.phone==='—') { const p=l.match(/(\+7|8)\s*[\(]?\d{3}[\)]?\s*\d{3}\s*\d{2}\s*\d{2}/); if(p) r.phone=p[0].trim(); }
       if(r.email==='—'&&/[\w.\-]+@[\w.\-]+/.test(l)) r.email=l.match(/[\w.\-]+@[\w.\-]+/)[0];
       if(r.inn==='—') { const d=l.match(/\b\d{10,12}\b/); if(d) r.inn=d[0]; }
@@ -101,21 +91,15 @@ module.exports = async (req, res) => {
     const update = typeof req.body==='string' ? JSON.parse(req.body) : req.body;
     const msg = update.message; if(!msg) return res.status(200).end();
     const chatId = msg.chat.id;
-    const sql = getDb(); await ensureTables(sql);
-    const authorized = await isAuthorized(sql, chatId);
+    const sql = getDb(); await ensureTable(sql);
     if(msg.text) {
       const text = msg.text.trim();
-      if(!authorized) {
-        if(text===ACCESS_CODE) { await authorizeUser(sql, chatId); await sendTelegram(chatId,'✅ <b>Доступ разрешён!</b>\n\nНапишите /start чтобы начать.'); }
-        else { await sendTelegram(chatId,'🔒 <b>Доступ запрещён.</b> Введите секретный код.'); }
-        return res.json({ok:true});
-      }
       if(text==='/start') {
-        await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n━━━━━━━━━━━━━━━━\n📌 <b>Поиск:</b> просто напишите текст\n📌 <b>Сохранить:</b> /save как ответ на сообщение, ИЛИ .txt файл\n📌 <b>/phone</b> <code>+7 916</code> — по телефону\n📌 <b>/inn</b> <code>7712</code> — по ИНН\n📌 <b>/fio</b> <code>Иванов</code> — по ФИО\n━━━━━━━━━━━━━━━━\n📋 /all /last /stats /count\n✏️ /edit /delete\n📤 /export\n🔍 /check ИНН\nПолный список: /help');
+        await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n━━━━━━━━━━━━━━━━\n📌 <b>Поиск:</b> просто напишите текст\n📌 <b>Сохранить:</b> /save как ответ на сообщение, ИЛИ .txt файл\n📌 <b>/phone</b> +7 916 — по телефону\n📌 <b>/inn</b> 7712 — по ИНН\n📌 <b>/fio</b> Иванов — по ФИО\n━━━━━━━━━━━━━━━━\n📋 /all /last /stats /count\n✏️ /edit /delete\n📤 /export\n🔍 /check ИНН\nПолный список: /help');
         return res.json({ok:true});
       }
       if(text==='/help') {
-        await sendTelegram(chatId,'🔍 <b>Команды:</b>\n━━━━━━━━━━━━━━━━\n<b>Поиск</b>\n/fio Иванов — по ФИО\n/phone +7 916 — по телефону\n/inn 7712 — по ИНН\n/email @mail — по email\n/car — по авто\n/address Москва — по адресу\n━━━━━━━━━━━━━━━━\n<b>Управление</b>\n/all — все записи\n/get 5 — запись #5\n/last — последние 5\n/count — сколько\n/random — случайная\n/dupes — дубликаты\n/delete 5 — удалить\n/edit 5 phone=+7... — изменить\n━━━━━━━━━━━━━━━━\n<b>Экспорт</b>\n/export — скачать базу .txt\n/share 5 — показать запись\n/check 771234567890 — проверить ИНН');
+        await sendTelegram(chatId,'🔍 <b>Команды:</b>\n━━━━━━━━━━━━━━━━\n<b>Поиск</b>\n/fio Иванов — по ФИО\n/phone +7 916 — по телефону\n/inn 7712 — по ИНН\n/email @mail — по email\n/car — по авто\n/address Москва — по адресу\n━━━━━━━━━━━━━━━━\n<b>Управление</b>\n/all — все записи\n/get 5 — запись #5\n/last — последние 5\n/count — сколько\n/random — случайная\n/dupes — дубликаты\n/delete 5 — удалить\n/edit 5 phone=+7... — изменить\n━━━━━━━━━━━━━━━━\n<b>Экспорт</b>\n/export — скачать базу .txt\n/check 771234567890 — проверить ИНН');
         return res.json({ok:true});
       }
       const fieldCmd = text.match(/^\/(fio|phone|inn|email|car|auto|address|court|social)\s(.+)/i);
@@ -140,8 +124,7 @@ module.exports = async (req, res) => {
       }
       if(text==='/stats') {
         const cnt = await sql`SELECT COUNT(*) as c FROM records`;
-        const users = await sql`SELECT COUNT(*) as c FROM bot_users`;
-        await sendTelegram(chatId,`📊 <b>Статистика</b>\n━━━━━━━━━━━━━━━━\n📝 Записей: ${cnt[0].c}\n👥 Пользователей: ${users[0].c}`);
+        await sendTelegram(chatId,`📊 <b>Статистика</b>\n━━━━━━━━━━━━━━━━\n📝 Записей: ${cnt[0].c}`);
         return res.json({ok:true});
       }
       if(text==='/count') {
@@ -172,13 +155,6 @@ module.exports = async (req, res) => {
           if(!r.length) { await sendTelegram(chatId,'❌ Запись не найдена.'); }
           else { await sendTelegram(chatId,`✅ <b>Обновлено</b> (ID: ${id}, поле: ${field})`); }
         } else { await sendTelegram(chatId,'❌ Формат: /edit 5 phone=+7 999 123-45-67'); }
-        return res.json({ok:true});
-      }
-      if(text.startsWith('/share ')) {
-        const id = parseInt(text.replace('/share ',''));
-        const r = await sql`SELECT * FROM records WHERE id = ${id}`;
-        if(!r.length) { await sendTelegram(chatId,'❌ Запись не найдена.'); }
-        else { await sendTelegram(chatId,`📤 <b>Запись #${id}</b>\n━━━━━━━━━━━\n${formatRecord(r[0])}`); }
         return res.json({ok:true});
       }
       if(text==='/all') {
@@ -247,10 +223,6 @@ module.exports = async (req, res) => {
         if(reply.length>4000) reply=reply.substring(0,3900)+'\n...';
         await sendTelegram(chatId, reply);
       }
-      return res.json({ok:true});
-    }
-    if(!authorized) {
-      await sendTelegram(chatId,'🔒 <b>Доступ запрещён.</b> Введите секретный код.');
       return res.json({ok:true});
     }
     if(msg.document) {
