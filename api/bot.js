@@ -19,19 +19,53 @@ function formatRecord(r) {
   if(r.passport!=='—') m+=`🆔 Паспорт: ${r.passport}\n`; return m;
 }
 async function sendTelegram(chatId, text, pm) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  if(!token) return;
+  const token = process.env.TELEGRAM_BOT_TOKEN; if(!token) return;
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:pm||'HTML',disable_web_page_preview:true})});
+}
+function parseSherlock(text) {
+  const r = { fio:'—', phone:'—', email:'—', address:'—', social:'—', auto:'—', property:'—', court:'—', inn:'—', passport:'—' };
+  const lines = text.split('\n');
+  for (const line of lines) {
+    const l = line.trim();
+    if (r.fio==='—') { const m = l.match(/^([А-ЯЁ][а-яё]+\s[А-ЯЁ][а-яё]+\s[А-ЯЁ][а-яё]+)/); if (m) r.fio = m[1]; }
+    if (/телефон|phone|тел/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.phone=v; }
+    if (/email|почта|e-?mail/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.email=v; }
+    if (/адрес|address|прожив/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.address=v; }
+    if (/соцсети|социальн|social|telegram|vk|t\.me/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.social=r.social==='—'?v:r.social+', '+v; }
+    if (/авто|машин|автомобил|car|auto/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.auto=v; }
+    if (/недвижим|жиль|property|дом|квартир/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.property=v; }
+    if (/суд|court|арбитраж|дело|исполнит/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.court=v; }
+    if (/инн/i.test(l)&&!/паспорт/.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(/\d{10,12}/.test(v)) r.inn=v; }
+    if (/паспорт|passport/i.test(l)) { const v = l.replace(/.*?[:]\s*/,'').trim(); if(v) r.passport=v; }
+    if (r.phone==='—') { const p = l.match(/(\+7|8)\s*[\(]?\d{3}[\)]?\s*\d{3}\s*\d{2}\s*\d{2}/); if(p) r.phone=p[0].trim(); }
+  }
+  return r;
+}
+async function saveRecord(sql, data) {
+  const v = (x) => (x && x.trim() && x!=='—') ? x.trim() : '—';
+  const r = await sql`INSERT INTO records (fio,phone,email,address,social,auto,property,court,inn,passport) VALUES (${v(data.fio)},${v(data.phone)},${v(data.email)},${v(data.address)},${v(data.social)},${v(data.auto)},${v(data.property)},${v(data.court)},${v(data.inn)},${v(data.passport)}) RETURNING id`;
+  return r[0].id;
 }
 module.exports = async (req, res) => {
   if(req.method!=='POST') return res.status(200).end();
   try {
     const update = typeof req.body==='string' ? JSON.parse(req.body) : req.body;
-    const msg = update.message;
-    if(!msg||!msg.text) return res.status(200).end();
+    const msg = update.message; if(!msg||!msg.text) return res.status(200).end();
     const chatId = msg.chat.id, text = msg.text.trim();
-    if(text==='/start') { await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n\nПришлите ФИО, телефон, email или любые данные для поиска.'); return res.json({ok:true}); }
-    if(text==='/help') { await sendTelegram(chatId,'🔍 Просто отправьте текст — бот ищет по всем полям. Частичное совпадение. Макс 10 результатов.'); return res.json({ok:true}); }
+    if(text==='/start') { await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n\n📌 <b>Поиск:</b> просто напишите текст\n📌 <b>Сохранить отчёт:</b> перешлите сообщение от Sherlock Report и ответьте на него /save'); return res.json({ok:true}); }
+    if(text==='/help') { await sendTelegram(chatId,'🔍 <b>Команды:</b>\n\n• /save — ответьте на сообщение от Sherlock, чтобы сохранить данные\n• Любой текст — поиск по БД'); return res.json({ok:true}); }
+    if(text==='/save' && msg.reply_to_message && msg.reply_to_message.text) {
+      const parsed = parseSherlock(msg.reply_to_message.text);
+      const sql = getDb(); await ensureTable(sql);
+      const id = await saveRecord(sql, parsed);
+      let reply = `✅ <b>Сохранено!</b> (ID: ${id})\n\n👤 ${parsed.fio}\n`;
+      if(parsed.phone!=='—') reply+=`📞 ${parsed.phone}\n`;
+      if(parsed.email!=='—') reply+=`📧 ${parsed.email}\n`;
+      if(parsed.address!=='—') reply+=`🏠 ${parsed.address}\n`;
+      if(parsed.inn!=='—') reply+=`🔢 ИНН: ${parsed.inn}\n`;
+      await sendTelegram(chatId, reply);
+      return res.json({ok:true});
+    }
     const sql = getDb(); await ensureTable(sql);
     const results = await searchRecords(sql, text);
     if(results.length===0) { await sendTelegram(chatId,'❌ Ничего не найдено.'); }
