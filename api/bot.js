@@ -20,6 +20,14 @@ async function sendTelegram(chatId, text, pm) {
   const token = process.env.TELEGRAM_BOT_TOKEN; if(!token) return;
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:chatId,text,parse_mode:pm||'HTML',disable_web_page_preview:true})});
 }
+async function getTelegramFile(fileId) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const res = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`);
+  const data = await res.json();
+  if (!data.ok || !data.result.file_path) return null;
+  const fileRes = await fetch(`https://api.telegram.org/file/bot${token}/${data.result.file_path}`);
+  return await fileRes.text();
+}
 function parseSherlock(text) {
   const r = { fio:'—', phone:'—', email:'—', address:'—', social:'—', auto:'—', property:'—', court:'—', inn:'—', passport:'—' };
   const lines = text.split('\n');
@@ -48,31 +56,49 @@ module.exports = async (req, res) => {
   if(req.method!=='POST') return res.status(200).end();
   try {
     const update = typeof req.body==='string' ? JSON.parse(req.body) : req.body;
-    const msg = update.message; if(!msg||!msg.text) return res.status(200).end();
-    const chatId = msg.chat.id, text = msg.text.trim();
-    if(text==='/start') { await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n\n📌 <b>Поиск:</b> просто напишите текст\n📌 <b>Сохранить отчёт:</b> перешлите сообщение от Sherlock Report и ответьте на него /save'); return res.json({ok:true}); }
-    if(text==='/help') { await sendTelegram(chatId,'🔍 <b>Команды:</b>\n\n• /save — ответьте на сообщение от Sherlock, чтобы сохранить\n• Любой текст — поиск по БД'); return res.json({ok:true}); }
-    if(text==='/save' && msg.reply_to_message && msg.reply_to_message.text) {
-      const parsed = parseSherlock(msg.reply_to_message.text);
+    const msg = update.message; if(!msg) return res.status(200).end();
+    const chatId = msg.chat.id;
+    if(msg.text) {
+      const text = msg.text.trim();
+      if(text==='/start') { await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n\n📌 <b>Поиск:</b> просто напишите текст\n📌 <b>Сохранить отчёт:</b> перешлите сообщение и ответьте /save\n📌 <b>.txt файл:</b> просто пришлите — распарсится и сохранится'); return res.json({ok:true}); }
+      if(text==='/help') { await sendTelegram(chatId,'🔍 <b>Команды:</b>\n\n• /save — ответьте на пересланное сообщение\n• Пришлите .txt — автосохранение\n• Любой текст — поиск'); return res.json({ok:true}); }
+      if(text==='/save' && msg.reply_to_message && msg.reply_to_message.text) {
+        const parsed = parseSherlock(msg.reply_to_message.text);
+        const sql = getDb(); await ensureTable(sql);
+        const id = await saveRecord(sql, parsed);
+        let reply = `✅ <b>Сохранено!</b> (ID: ${id})\n\n👤 ${parsed.fio}\n`;
+        if(parsed.phone!=='—') reply+=`📞 ${parsed.phone}\n`; if(parsed.email!=='—') reply+=`📧 ${parsed.email}\n`;
+        if(parsed.address!=='—') reply+=`🏠 ${parsed.address}\n`; if(parsed.inn!=='—') reply+=`🔢 ИНН: ${parsed.inn}\n`;
+        await sendTelegram(chatId, reply); return res.json({ok:true});
+      }
+      const sql = getDb(); await ensureTable(sql);
+      const results = await searchRecords(sql, text);
+      if(results.length===0) { await sendTelegram(chatId,'❌ Ничего не найдено.'); }
+      else {
+        let reply = `🔍 <b>Результаты:</b>\n━━━━━━━━━━━\n\n`;
+        for(const r of results) reply += formatRecord(r)+'━━━━━━━━━━━\n';
+        if(reply.length>4000) reply=reply.substring(0,3900)+'\n...';
+        await sendTelegram(chatId, reply);
+      }
+      return res.json({ok:true});
+    }
+    if(msg.document) {
+      const doc = msg.document;
+      if(!doc.file_name || !doc.file_name.toLowerCase().endsWith('.txt')) {
+        await sendTelegram(chatId,'❌ Пришлите файл в формате .txt');
+        return res.json({ok:true});
+      }
+      const content = await getTelegramFile(doc.file_id);
+      if(!content) { await sendTelegram(chatId,'❌ Не удалось прочитать файл'); return res.json({ok:true}); }
+      const parsed = parseSherlock(content);
       const sql = getDb(); await ensureTable(sql);
       const id = await saveRecord(sql, parsed);
-      let reply = `✅ <b>Сохранено!</b> (ID: ${id})\n\n👤 ${parsed.fio}\n`;
-      if(parsed.phone!=='—') reply+=`📞 ${parsed.phone}\n`;
-      if(parsed.email!=='—') reply+=`📧 ${parsed.email}\n`;
-      if(parsed.address!=='—') reply+=`🏠 ${parsed.address}\n`;
-      if(parsed.inn!=='—') reply+=`🔢 ИНН: ${parsed.inn}\n`;
+      let reply = `✅ <b>Сохранено из файла!</b> (ID: ${id})\n\n👤 ${parsed.fio}\n`;
+      if(parsed.phone!=='—') reply+=`📞 ${parsed.phone}\n`; if(parsed.email!=='—') reply+=`📧 ${parsed.email}\n`;
+      if(parsed.address!=='—') reply+=`🏠 ${parsed.address}\n`; if(parsed.inn!=='—') reply+=`🔢 ИНН: ${parsed.inn}\n`;
       await sendTelegram(chatId, reply);
       return res.json({ok:true});
     }
-    const sql = getDb(); await ensureTable(sql);
-    const results = await searchRecords(sql, text);
-    if(results.length===0) { await sendTelegram(chatId,'❌ Ничего не найдено.'); }
-    else {
-      let reply = `🔍 <b>Результаты:</b>\n━━━━━━━━━━━\n\n`;
-      for(const r of results) reply += formatRecord(r)+'━━━━━━━━━━━\n';
-      if(reply.length>4000) reply=reply.substring(0,3900)+'\n...';
-      await sendTelegram(chatId, reply);
-    }
-    res.json({ok:true});
+    res.status(200).end();
   } catch(err) { console.error(err); res.status(200).end(); }
 };
