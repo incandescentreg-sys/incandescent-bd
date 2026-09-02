@@ -58,13 +58,13 @@ function parseSherlock(text) {
   const r = { fio:'—', phone:'—', email:'—', address:'—', social:'—', auto:'—', property:'—', court:'—', inn:'—', passport:'—' };
   for (const line of text.split('\n')) {
     const l = line.trim(); if(!l) continue;
-    const m = l.match(/^([\wА-ЯЁа-яё\s\-]+)\s*[:—]\s*(.+)$/);
+    const m = l.match(/^([\wА-ЯЁа-яё\s\-]+):\s*(.+)$/);
     if(m) {
       const key = m[1].trim().toLowerCase(), val = m[2].trim();
       if(/фио|ф\.и\.о|имя|фамилия|фам|person|name/.test(key)) r.fio=r.fio==='—'?val:r.fio;
       if(/телефон|телефоны|phone|тел|моб|номер|контакт/.test(key)) r.phone=r.phone==='—'?val:r.phone+', '+val;
       if(/email|почта|e-?mail|эл/.test(key)) r.email=r.email==='—'?val:r.email+', '+val;
-      if(/адрес|адреса|address|прожив|регистрац|место/.test(key)) r.address=r.address==='—'?val:r.address+', '+val;
+      if(/адрес|адреса|address|прожив|регистрац|место|справочный адрес/.test(key)) r.address=r.address==='—'?val:r.address+', '+val;
       if(/соцсети|соц\.сети|social|telegram|инстаграм|вконтакте|vkontakte/.test(key)) r.social=r.social==='—'?val:r.social+', '+val;
       if(/авто|машин|автомобил|car|transport|транспорт/.test(key)) r.auto=r.auto==='—'?val:r.auto+', '+val;
       if(/недвижим|жиль|property|квартир|дом|участок/.test(key)) r.property=r.property==='—'?val:r.property+', '+val;
@@ -80,168 +80,20 @@ function parseSherlock(text) {
   }
   return r;
 }
-async function saveRecord(sql, data, rawText) {
-  const v = (x) => (x && x.trim() && x!=='—') ? x.trim() : '—';
-  const r = await sql`INSERT INTO records (fio,phone,email,address,social,auto,property,court,inn,passport,raw) VALUES (${v(data.fio)},${v(data.phone)},${v(data.email)},${v(data.address)},${v(data.social)},${v(data.auto)},${v(data.property)},${v(data.court)},${v(data.inn)},${v(data.passport)},${rawText||'—'}) RETURNING id`;
-  return r[0].id;
-}
-module.exports = async (req, res) => {
-  if(req.method!=='POST') return res.status(200).end();
-  try {
-    const update = typeof req.body==='string' ? JSON.parse(req.body) : req.body;
-    const msg = update.message; if(!msg) return res.status(200).end();
-    const chatId = msg.chat.id;
-    const sql = getDb(); await ensureTable(sql);
-    if(msg.text) {
-      const text = msg.text.trim();
-      if(text==='/start') {
-        await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n━━━━━━━━━━━━━━━━\n📌 <b>Поиск:</b> просто напишите текст\n📌 <b>Сохранить:</b> /save как ответ на сообщение, ИЛИ .txt файл\n📌 <b>/phone</b> +7 916 — по телефону\n📌 <b>/inn</b> 7712 — по ИНН\n📌 <b>/fio</b> Иванов — по ФИО\n━━━━━━━━━━━━━━━━\n📋 /all /last /stats /count\n✏️ /edit /delete\n📤 /export\n🔍 /check ИНН\nПолный список: /help');
-        return res.json({ok:true});
-      }
-      if(text==='/help') {
-        await sendTelegram(chatId,'🔍 <b>Команды:</b>\n━━━━━━━━━━━━━━━━\n<b>Поиск</b>\n/fio Иванов — по ФИО\n/phone +7 916 — по телефону\n/inn 7712 — по ИНН\n/email @mail — по email\n/car — по авто\n/address Москва — по адресу\n━━━━━━━━━━━━━━━━\n<b>Управление</b>\n/all — все записи\n/get 5 — запись #5\n/last — последние 5\n/count — сколько\n/random — случайная\n/dupes — дубликаты\n/delete 5 — удалить\n/edit 5 phone=+7... — изменить\n━━━━━━━━━━━━━━━━\n<b>Экспорт</b>\n/export — скачать базу .txt\n/check 771234567890 — проверить ИНН');
-        return res.json({ok:true});
-      }
-      const fieldCmd = text.match(/^\/(fio|phone|inn|email|car|auto|address|court|social)\s(.+)/i);
-      if(fieldCmd) {
-        const fieldMap = {fio:'fio',phone:'phone',inn:'inn',email:'email',car:'auto',auto:'auto',address:'address',court:'court',social:'social'};
-        const f = fieldMap[fieldCmd[1].toLowerCase()];
-        const q = fieldCmd[2].trim();
-        const results = await searchRecords(sql, q, f);
-        if(!results.length) { await sendTelegram(chatId,`❌ Ничего не найдено по ${FIELD_NAMES[f]||f}: ${q}`); }
-        else {
-          let reply = `🔍 <b>Поиск по ${FIELD_NAMES[f]||f}:</b> ${q}\n━━━━━━━━━━━\n\n`;
-          for(const r of results) reply += formatRecord(r)+'━━━━━━━━━━━\n';
-          if(reply.length>4000) reply=reply.substring(0,3900)+'\n...';
-          await sendTelegram(chatId, reply);
-        }
-        return res.json({ok:true});
-      }
-      if(text.match(/^\/check\s+(\d{10,12})/)) {
-        const inn = text.match(/\d{10,12}/)[0];
-        await sendTelegram(chatId, `🔢 <b>Проверка ИНН:</b> <code>${inn}</code>\n${validateInn(inn)}`);
-        return res.json({ok:true});
-      }
-      if(text==='/stats') {
-        const cnt = await sql`SELECT COUNT(*) as c FROM records`;
-        await sendTelegram(chatId,`📊 <b>Статистика</b>\n━━━━━━━━━━━━━━━━\n📝 Записей: ${cnt[0].c}`);
-        return res.json({ok:true});
-      }
-      if(text==='/count') {
-        const cnt = await sql`SELECT COUNT(*) as c FROM records`;
-        await sendTelegram(chatId,`📝 <b>Всего записей:</b> ${cnt[0].c}`);
-        return res.json({ok:true});
-      }
-      if(text.startsWith('/get ')) {
-        const id = parseInt(text.replace('/get ',''));
-        const r = await sql`SELECT * FROM records WHERE id = ${id}`;
-        if(!r.length) { await sendTelegram(chatId,'❌ Запись не найдена.'); }
-        else { await sendTelegram(chatId,`📋 <b>Запись #${id}</b>\n━━━━━━━━━━━\n${formatRecord(r[0])}`); }
-        return res.json({ok:true});
-      }
-      if(text.startsWith('/delete ')) {
-        const id = parseInt(text.replace('/delete ',''));
-        const r = await sql`DELETE FROM records WHERE id = ${id} RETURNING id`;
-        if(!r.length) { await sendTelegram(chatId,'❌ Запись не найдена.'); }
-        else { await sendTelegram(chatId,`🗑 <b>Удалено</b> (ID: ${id})`); }
-        return res.json({ok:true});
-      }
-      if(text.startsWith('/edit ')) {
-        const m = text.match(/^\/edit\s+(\d+)\s+(\w+)\s*=\s*(.+)/i);
-        if(m) {
-          const id = parseInt(m[1]), field = m[2].toLowerCase(), value = m[3].trim();
-          if(!ALLOWED_FIELDS.includes(field)) { await sendTelegram(chatId,`❌ Поле ${field} не существует. Доступны: ${ALLOWED_FIELDS.join(', ')}`); return res.json({ok:true}); }
-          const r = await sql`UPDATE records SET ${sql(field)} = ${value} WHERE id = ${id} RETURNING id`;
-          if(!r.length) { await sendTelegram(chatId,'❌ Запись не найдена.'); }
-          else { await sendTelegram(chatId,`✅ <b>Обновлено</b> (ID: ${id}, поле: ${field})`); }
-        } else { await sendTelegram(chatId,'❌ Формат: /edit 5 phone=+7 999 123-45-67'); }
-        return res.json({ok:true});
-      }
-      if(text==='/all') {
-        const rows = await sql`SELECT * FROM records ORDER BY id ASC LIMIT 20`;
-        if(!rows.length) { await sendTelegram(chatId,'❌ База пуста.'); }
-        else {
-          let reply = `📋 <b>Все записи:</b>\n━━━━━━━━━━━\n\n`;
-          for(const r of rows) reply += `#${r.id} 👤 ${r.fio}\n📞 ${r.phone!=='—'?r.phone:'—'}\n━━━━━━━━━━━\n`;
-          if(reply.length>4000) reply=reply.substring(0,3900)+'\n...';
-          await sendTelegram(chatId, reply);
-        }
-        return res.json({ok:true});
-      }
-      if(text==='/last') {
-        const rows = await sql`SELECT * FROM records ORDER BY id DESC LIMIT 5`;
-        if(!rows.length) { await sendTelegram(chatId,'❌ База пуста.'); }
-        else {
-          let reply = `🆕 <b>Последние записи:</b>\n━━━━━━━━━━━\n\n`;
-          for(const r of rows) reply += `#${r.id} 👤 ${r.fio}\n📞 ${r.phone!=='—'?r.phone:'—'}\n━━━━━━━━━━━\n`;
-          await sendTelegram(chatId, reply);
-        }
-        return res.json({ok:true});
-      }
-      if(text==='/random') {
-        const r = await sql`SELECT * FROM records ORDER BY RANDOM() LIMIT 1`;
-        if(!r.length) { await sendTelegram(chatId,'❌ База пуста.'); }
-        else { await sendTelegram(chatId,`🎲 <b>Случайная запись</b>\n━━━━━━━━━━━\n${formatRecord(r[0])}`); }
-        return res.json({ok:true});
-      }
-      if(text==='/dupes') {
-        const rows = await sql`SELECT fio,phone,COUNT(*) as cnt FROM records WHERE fio!='—' GROUP BY fio,phone HAVING COUNT(*)>1 ORDER BY cnt DESC LIMIT 10`;
-        if(!rows.length) { await sendTelegram(chatId,'✅ Дубликатов не найдено.'); }
-        else {
-          let reply = `⚠️ <b>Возможные дубликаты:</b>\n━━━━━━━━━━━\n\n`;
-          for(const r of rows) reply += `👤 ${r.fio} | 📞 ${r.phone} — <b>${r.cnt} шт</b>\n━━━━━━━━━━━\n`;
-          await sendTelegram(chatId, reply);
-        }
-        return res.json({ok:true});
-      }
-      if(text==='/export') {
-        const rows = await sql`SELECT * FROM records ORDER BY id ASC`;
-        if(!rows.length) { await sendTelegram(chatId,'❌ База пуста.'); return res.json({ok:true}); }
-        let txt = '';
-        for(const r of rows) {
-          txt += `ID: ${r.id}\nФИО: ${r.fio}\nТелефон: ${r.phone}\nEmail: ${r.email}\nАдрес: ${r.address}\nСоцсети: ${r.social}\nАвто: ${r.auto}\nНедвижимость: ${r.property}\nСуды: ${r.court}\nИНН: ${r.inn}\nПаспорт: ${r.passport}\n${'─'.repeat(30)}\n`;
-        }
-        await sendTelegramFile(chatId, txt, 'sherlock-db-export.txt');
-        await sendTelegram(chatId,`📤 <b>Экспорт готов!</b> (${rows.length} записей)`);
-        return res.json({ok:true});
-      }
-      if(text==='/save' && msg.reply_to_message && msg.reply_to_message.text) {
-        const forwarded = msg.reply_to_message.text;
-        const parsed = parseSherlock(forwarded);
-        const id = await saveRecord(sql, parsed, forwarded);
-        let reply = `✅ <b>Сохранено!</b> (ID: ${id})\n\n👤 ${parsed.fio}\n`;
-        if(parsed.phone!=='—') reply+=`📞 ${parsed.phone}\n`; if(parsed.email!=='—') reply+=`📧 ${parsed.email}\n`;
-        if(parsed.address!=='—') reply+=`🏠 ${parsed.address}\n`; if(parsed.inn!=='—') reply+=`🔢 ИНН: ${parsed.inn}\n`;
-        reply += `\n📄 Полный текст тоже сохранён.`;
-        await sendTelegram(chatId, reply); return res.json({ok:true});
-      }
-      const results = await searchRecords(sql, text, null);
-      if(!results.length) { await sendTelegram(chatId,'❌ Ничего не найдено.'); }
-      else {
-        let reply = `🔍 <b>Результаты:</b>\n━━━━━━━━━━━\n\n`;
-        for(const r of results) reply += formatRecord(r)+'━━━━━━━━━━━\n';
-        if(reply.length>4000) reply=reply.substring(0,3900)+'\n...';
-        await sendTelegram(chatId, reply);
-      }
-      return res.json({ok:true});
-    }
-    if(msg.document) {
-      const doc = msg.document;
-      if(!doc.file_name || !doc.file_name.toLowerCase().endsWith('.txt')) {
-        await sendTelegram(chatId,'❌ Пришлите файл .txt');
-        return res.json({ok:true});
-      }
-      const content = await getTelegramFile(doc.file_id);
-      if(!content) { await sendTelegram(chatId,'❌ Не удалось прочитать файл'); return res.json({ok:true}); }
-      const parsed = parseSherlock(content);
-      const id = await saveRecord(sql, parsed, content);
-      let reply = `✅ <b>Сохранено из файла!</b> (ID: ${id})\n\n👤 ${parsed.fio}\n`;
-      if(parsed.phone!=='—') reply+=`📞 ${parsed.phone}\n`; if(parsed.email!=='—') reply+=`📧 ${parsed.email}\n`;
-      if(parsed.address!=='—') reply+=`🏠 ${parsed.address}\n`; if(parsed.inn!=='—') reply+=`🔢 ИНН: ${parsed.inn}\n`;
-      reply += `\n📄 Полный текст тоже сохранён.`;
-      await sendTelegram(chatId, reply);
-      return res.json({ok:true});
-    }
-    res.status(200).end();
-  } catch(err) { console.error(err); res.status(200).end(); }
-};
+function parseSherlockTxt(text) {
+  const sections = text.split(/\n=== /);
+  let allData = [];
+  for (const section of sections) {
+    const person = { fio:'—', phone:'—', email:'—', address:'—', social:'—', auto:'—', property:'—', court:'—', inn:'—', passport:'—' };
+    const lines = section.split('\n');
+    for (const line of lines) {
+      const l = line.trim();
+      const m = l.match(/^([\wА-ЯЁа-яё\s\-]+):\s*(.+)$/);
+      if(m) {
+        const key = m[1].trim().toLowerCase(), val = m[2].trim();
+        if(!val || val==='') continue;
+        if(/фио|ф\.и\.о|имя|фамилия|full name|полное имя/i.test(key)) person.fio=person.fio==='—'?val:person.fio;
+        if(/телефон/i.test(key)&&!/телефонные/i.test(key)) person.phone=person.phone==='—'?val:person.phone+', '+val;
+        if(/email|почта|e-?mail/i.test(key)) person.email=person.email==='—'?val:person.email+', '+val;
+        if(/адрес|address|место жительства|справочный адрес/i.test(key)) person.address=person.address==='—'?val:person.address+', '+val;
+        if
