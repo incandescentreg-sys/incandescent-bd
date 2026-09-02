@@ -5,10 +5,8 @@ async function ensureTable(sql) {
   await sql(`CREATE TABLE IF NOT EXISTS records (id SERIAL PRIMARY KEY,fio TEXT NOT NULL DEFAULT '—',phone TEXT NOT NULL DEFAULT '—',email TEXT NOT NULL DEFAULT '—',address TEXT NOT NULL DEFAULT '—',social TEXT NOT NULL DEFAULT '—',auto TEXT NOT NULL DEFAULT '—',property TEXT NOT NULL DEFAULT '—',court TEXT NOT NULL DEFAULT '—',inn TEXT NOT NULL DEFAULT '—',passport TEXT NOT NULL DEFAULT '—',created_at TIMESTAMP DEFAULT NOW());`);
 }
 async function searchRecords(sql, q) {
-  const conditions = ALLOWED_FIELDS.map(f => sql`${sql(f)} ILIKE '%' || ${q} || '%'`);
-  let orClause = conditions[0];
-  for (let i = 1; i < conditions.length; i++) orClause = sql`${orClause} OR ${conditions[i]}`;
-  return await sql`SELECT * FROM records WHERE ${orClause} ORDER BY id ASC LIMIT 10`;
+  const p = `%${q}%`;
+  return await sql`SELECT * FROM records WHERE fio ILIKE ${p} OR phone ILIKE ${p} OR email ILIKE ${p} OR address ILIKE ${p} OR social ILIKE ${p} OR auto ILIKE ${p} OR property ILIKE ${p} OR court ILIKE ${p} OR inn ILIKE ${p} OR passport ILIKE ${p} ORDER BY id ASC LIMIT 10`;
 }
 function formatRecord(r) {
   let m = `👤 <b>${r.fio}</b>\n`;
@@ -53,7 +51,7 @@ module.exports = async (req, res) => {
     const msg = update.message; if(!msg||!msg.text) return res.status(200).end();
     const chatId = msg.chat.id, text = msg.text.trim();
     if(text==='/start') { await sendTelegram(chatId,'🔍 <b>Sherlock DB Bot</b>\n\n📌 <b>Поиск:</b> просто напишите текст\n📌 <b>Сохранить отчёт:</b> перешлите сообщение от Sherlock Report и ответьте на него /save'); return res.json({ok:true}); }
-    if(text==='/help') { await sendTelegram(chatId,'🔍 <b>Команды:</b>\n\n• /save — ответьте на сообщение от Sherlock, чтобы сохранить данные\n• Любой текст — поиск по БД'); return res.json({ok:true}); }
+    if(text==='/help') { await sendTelegram(chatId,'🔍 <b>Команды:</b>\n\n• /save — ответьте на сообщение от Sherlock, чтобы сохранить\n• Любой текст — поиск по БД'); return res.json({ok:true}); }
     if(text==='/save' && msg.reply_to_message && msg.reply_to_message.text) {
       const parsed = parseSherlock(msg.reply_to_message.text);
       const sql = getDb(); await ensureTable(sql);
